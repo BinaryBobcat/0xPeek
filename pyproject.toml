@@ -12,5 +12,8 @@ dependencies = [
     "pyfsig",
 ]
 
+[tool.hatch.build.targets.wheel]
+packages = ["oxpeek.py"]
+
 [project.scripts]
 0xpeek = "oxpeek:main"
