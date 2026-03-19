@@ -37,7 +37,7 @@ pipx install .
 
 ## Interface
 
-Picture
+![Demo](assets/0xPeek.gif)
 
 ## Keybindings
 
