@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "0xPeek"
+version = "0.1.0"
+description = "A terminal hex editor for reverse engineering and malware analysis"
+requires-python = ">=3.10"
+dependencies = [
+    "textual>=0.50.0",
+    "pyfsig",
+]
+
+[project.scripts]
+0xpeek = "oxpeek:main"
