@@ -4,7 +4,7 @@
 
 A simple terminal hex editor.
 
-<img src="assets/0xPeek_logo.png" width="750">
+<img src="assets/0xPeek_logo.png">
 
 ## Features
 
