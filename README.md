@@ -1,10 +1,10 @@
 # 0xPeek
 
-![Screenshot](assets/0xPeek_logo.png)
-
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 
 A simple terminal hex editor.
+
+<img src="assets/0xPeek_logo.png" width="500">
 
 ## Features
 
