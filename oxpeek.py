@@ -137,6 +137,8 @@ class HexView(Widget):
         self._sel_anchor: int | None = None
         self._sel_end: int | None = None
         self._dragging: bool = False
+        self._search_highlight: set[int] = set()   # all match byte positions
+        self._search_current: set[int] = set()     # current match byte positions
 
     def _total_rows(self) -> int:
         return max(1, (len(self.data) + BYTES_PER_ROW - 1) // BYTES_PER_ROW)
@@ -192,6 +194,10 @@ class HexView(Widget):
 
                 if is_cursor and self.edit_pane == "hex":
                     style = Style.parse("black on yellow bold")
+                elif byte_pos in self._search_current:
+                    style = Style.parse("black on bright_green bold")
+                elif byte_pos in self._search_highlight:
+                    style = Style.parse("bright_green")
                 elif is_selected:
                     style = Style.parse("black on bright_cyan")
                 elif is_modified:
@@ -219,6 +225,10 @@ class HexView(Widget):
 
             if is_cursor and self.edit_pane == "ascii":
                 style = Style.parse("black on cyan bold")
+            elif byte_pos in self._search_current:
+                style = Style.parse("black on bright_green bold")
+            elif byte_pos in self._search_highlight:
+                style = Style.parse("bright_green")
             elif is_selected:
                 style = Style.parse("black on bright_cyan")
             elif is_modified:
@@ -284,6 +294,15 @@ class HexView(Widget):
     def on_key(self, event: events.Key) -> None:
         if getattr(self.app, "_save_state", None) is not None:
             return
+        search_state = getattr(self.app, "_search_state", None)
+        if search_state is not None and search_state != "results":
+            return
+        if search_state == "results":
+            _nav = {"up", "down", "left", "right", "pageup", "pagedown",
+                    "home", "end", "ctrl+home", "ctrl+end", "tab",
+                    "numpad_8", "numpad_2", "numpad_4", "numpad_6"}
+            if event.key not in _nav:
+                return  # block editing; let n/N/Esc bubble to app
 
         key = event.key
 
@@ -416,11 +435,19 @@ class HexEditApp(App):
         height: 1;
         padding: 0 1;
     }
+    #searchbar {
+        background: $panel;
+        color: $foreground;
+        height: 1;
+        padding: 0 1;
+        display: none;
+    }
     """
 
     BINDINGS = [
         ("ctrl+s", "save", "Save"),
         ("ctrl+c", "copy", "Copy"),
+        ("ctrl+f", "search", "Find"),
         ("ctrl+q", "quit_app", "Quit"),
     ]
 
@@ -432,6 +459,12 @@ class HexEditApp(App):
         self._save_state: str | None = None   # None | "prompt" | "copy_path" | "copy_fmt"
         self._copy_path_buf: str = ""
         self._last_cursor_event: HexView.CursorMoved | None = None
+        self._search_state: str | None = None  # None | "mode" | "hex_input" | "ascii_input" | "results"
+        self._search_buf: str = ""
+        self._search_is_hex: bool = True
+        self._search_matches: list[int] = []
+        self._search_match_len: int = 0
+        self._search_idx: int = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -439,6 +472,7 @@ class HexEditApp(App):
         yield EntropyBar("")
         yield HexView(self._data, id="hexview")
         yield Static("", id="statusbar")
+        yield Static("", id="searchbar")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -465,7 +499,7 @@ class HexEditApp(App):
 
     def on_hex_view_cursor_moved(self, event: HexView.CursorMoved) -> None:
         self._last_cursor_event = event
-        if self._save_state is None:
+        if self._save_state is None and self._search_state not in ("mode", "hex_input", "ascii_input"):
             self._refresh_status()
 
     def _clipboard_write(self, text: str) -> None:
@@ -475,6 +509,8 @@ class HexEditApp(App):
             pass
 
     def action_copy(self) -> None:
+        if self._search_state is not None:
+            return
         view = self.query_one("#hexview", HexView)
         sel = view.sel_range()
         count = (sel[1] - sel[0] + 1) if sel else 1
@@ -508,6 +544,8 @@ class HexEditApp(App):
     # ── Save flow ──────────────────────────────────────────────────────────────
 
     def action_save(self) -> None:
+        if self._search_state is not None:
+            return
         view = self.query_one("#hexview", HexView)
         if not view.modified:
             return
@@ -521,6 +559,53 @@ class HexEditApp(App):
         )
 
     def on_key(self, event: events.Key) -> None:
+        if self._search_state == "mode":
+            event.stop()
+            if event.key == "h":
+                self._search_is_hex = True
+                self._search_state = "hex_input"
+                self._search_buf = ""
+                self._update_search_prompt()
+            elif event.key == "a":
+                self._search_is_hex = False
+                self._search_state = "ascii_input"
+                self._search_buf = ""
+                self._update_search_prompt()
+            elif event.key == "escape":
+                self._search_state = None
+                self._refresh_status()
+            return
+
+        elif self._search_state in ("hex_input", "ascii_input"):
+            event.stop()
+            if event.key == "enter":
+                self._do_search()
+            elif event.key == "escape":
+                self._search_state = None
+                self._search_buf = ""
+                self._refresh_status()
+            elif event.key == "backspace":
+                self._search_buf = self._search_buf[:-1]
+                self._update_search_prompt()
+            elif event.character and ord(event.character) >= 32:
+                self._search_buf += event.character
+                self._update_search_prompt()
+            return
+
+        elif self._search_state == "results":
+            if event.key == "n":
+                event.stop()
+                self._search_next(1)
+                return
+            elif event.key == "p":
+                event.stop()
+                self._search_next(-1)
+                return
+            elif event.key == "escape":
+                event.stop()
+                self._clear_search()
+                return
+
         if self._save_state == "prompt":
             event.stop()
             if event.key == "o":
@@ -593,6 +678,133 @@ class HexEditApp(App):
             f"[bold]Save copy to:[/] [white]{self._copy_path_buf}[/][bright_yellow]█[/]  "
             "[bright_black]Enter to confirm · Esc to cancel[/]"
         )
+
+    # ── Search flow ────────────────────────────────────────────────────────────
+
+    def action_search(self) -> None:
+        if self._save_state is not None:
+            return
+        if self._search_state == "results":
+            view = self.query_one("#hexview", HexView)
+            view._search_highlight = set()
+            view._search_current = set()
+            view.refresh()
+        self._search_state = "mode"
+        self._search_buf = ""
+        sbar = self.query_one("#searchbar", Static)
+        sbar.display = True
+        sbar.update(
+            "[bold]Find:[/]  "
+            "[bold yellow]\\[H][/] Hex bytes   "
+            "[bold cyan]\\[A][/] ASCII string   "
+            "[bright_black]\\[Esc][/] Cancel"
+        )
+
+    def _update_search_prompt(self) -> None:
+        sbar = self.query_one("#searchbar", Static)
+        mode = "Hex" if self._search_is_hex else "ASCII"
+        sbar.update(
+            f"[bold]Find {mode}:[/] [white]{self._search_buf}[/][bright_yellow]█[/]  "
+            "[bright_black]Enter to search · Esc to cancel[/]"
+        )
+
+    def _do_search(self) -> None:
+        sbar = self.query_one("#searchbar", Static)
+        view = self.query_one("#hexview", HexView)
+        if self._search_is_hex:
+            hex_str = self._search_buf.replace(" ", "")
+            if not hex_str or len(hex_str) % 2 != 0:
+                sbar.update("[bold red]Invalid hex pattern (need even number of hex digits)[/]  [bright_black]Esc to cancel[/]")
+                return
+            try:
+                pattern = bytes.fromhex(hex_str)
+            except ValueError:
+                sbar.update("[bold red]Invalid hex pattern[/]  [bright_black]Esc to cancel[/]")
+                return
+        else:
+            if not self._search_buf:
+                sbar.update("[bold red]Empty search pattern[/]  [bright_black]Esc to cancel[/]")
+                return
+            pattern = self._search_buf.encode("latin-1", errors="replace")
+
+        data = bytes(view.data)
+        plen = len(pattern)
+        matches: list[int] = []
+        start = 0
+        while True:
+            idx = data.find(pattern, start)
+            if idx == -1:
+                break
+            matches.append(idx)
+            start = idx + 1
+
+        self._search_state = "results"
+        if not matches:
+            view._search_highlight = set()
+            view._search_current = set()
+            view.refresh()
+            sbar.update("[bold red]No matches found[/]  [bright_black]│[/]  [bright_black]\\[Esc][/] clear")
+            return
+
+        self._search_matches = matches
+        self._search_match_len = plen
+        self._search_idx = 0
+        self._update_search_highlights(view)
+        view._jump(matches[0])
+        self._update_search_status()
+
+    def _update_search_highlights(self, view: HexView) -> None:
+        plen = self._search_match_len
+        all_bytes: set[int] = set()
+        current_bytes: set[int] = set()
+        current_start = self._search_matches[self._search_idx]
+        for start in self._search_matches:
+            for j in range(plen):
+                all_bytes.add(start + j)
+            if start == current_start:
+                for j in range(plen):
+                    current_bytes.add(start + j)
+        view._search_highlight = all_bytes
+        view._search_current = current_bytes
+        view.refresh()
+
+    def _update_search_status(self) -> None:
+        sbar = self.query_one("#searchbar", Static)
+        count = len(self._search_matches)
+        idx = self._search_idx + 1
+        match_start = self._search_matches[self._search_idx]
+        sbar.update(
+            f"[bold green]count: {count}[/]  [bright_black]│[/]  "
+            f"[bold cyan]{idx} of {count}[/]  at [bright_blue]0x{match_start:08x}[/]  [bright_black]│[/]  "
+            f"[bold yellow]\\[n][/] next  [bold yellow]\\[p][/] prev  [bright_black]│[/]  [bright_black]\\[Esc][/] clear"
+        )
+
+    def _search_next(self, direction: int) -> None:
+        if not self._search_matches:
+            return
+        view = self.query_one("#hexview", HexView)
+        self._search_idx = (self._search_idx + direction) % len(self._search_matches)
+        self._update_search_highlights(view)
+        view._jump(self._search_matches[self._search_idx])
+        self._update_search_status()
+
+    def _clear_search(self) -> None:
+        self._search_state = None
+        self._search_matches = []
+        self._search_match_len = 0
+        view = self.query_one("#hexview", HexView)
+        view._search_highlight = set()
+        view._search_current = set()
+        view.refresh()
+        sbar = self.query_one("#searchbar", Static)
+        sbar.display = False
+        self._refresh_status()
+
+    def action_screenshot(self, filename: str | None = None, path: str | None = None) -> None:
+        self.deliver_screenshot(filename, path or ".")
+
+    def deliver_screenshot(self, filename: str | None = None, path: str | None = None, time_format: str | None = None) -> str | None:
+        return super().deliver_screenshot(filename, path or ".", time_format)
 
     def action_quit_app(self) -> None:
         view = self.query_one("#hexview", HexView)

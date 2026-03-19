@@ -8,8 +8,8 @@ A simple terminal hex editor.
 
 ## Features
 
-- **Magic byte detection** — identifies file type from header bytes (ELF, PE, Mach-O, ZIP, PDF, and hundreds more via `pyfsig`)
-- **Shannon entropy analysis** — displays entropy of the full file (0–8 scale) to quickly spot encrypted, compressed, or packed regions
+- **Magic byte detection** — identifies file type (ELF, PE, Mach-O, ZIP, PDF, and hundreds more via `pyfsig`)
+- **Shannon entropy analysis** — displays entropy of the file (0–8 scale)
 - **Hex + ASCII panes** — edit in either pane, toggle with `Tab`
 - **Mouse drag selection** — click and drag to select a byte range, then copy as `\x`-style hex or ASCII
 - **Theme support** — respects Textual's built-in themes (Nord, Gruvbox, Catppuccin Mocha, and more)
@@ -28,8 +28,6 @@ git clone https://github.com/BinaryBobcat/0xPeek.git
 cd 0xPeek
 pipx install .
 ```
-
-> `pipx` keeps the tool in an isolated environment. Install it with `brew install pipx` or `pip install pipx` if you don't have it.
 
 ## Usage
 
@@ -52,6 +50,9 @@ Picture
 | `Ctrl+Home / End` | Start / end of file |
 | `Ctrl+S` | Save |
 | `Ctrl+C` | Copy selection (or current byte) |
+| `Ctrl+F` | Find (hex bytes or ASCII string) |
+| `n` / `p` | Next / previous search match |
+| `Esc` | Cancel prompt / clear search |
 | `Ctrl+Q` | Quit |
 
 ## Editing
@@ -81,6 +82,23 @@ Press `Ctrl+C` to copy:
 - **`Esc`** — cancel
 
 If no selection exists, the current byte under the cursor is copied.
+
+## Search
+
+Press `Ctrl+F` to open the search prompt, then choose a mode:
+
+- **`H`** — search for hex bytes (e.g. `4d 5a 90 00` or `4d5a9000`)
+- **`A`** — search for an ASCII string
+
+Type the pattern and press `Enter`. All matches are highlighted in green across both panes, with the current match in bold green. The status bar shows the match count and current position.
+
+- **`n`** — jump to the next match
+- **`p`** — jump to the previous match
+- **`Esc`** — clear the search and highlights
+
+## Screenshot
+
+Press `Ctrl+P` and select **Screenshot** (or search for it) to save an SVG screenshot of the current view. The file is saved to the directory you ran `0xpeek` from.
 
 ## Themes
 
