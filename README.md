@@ -11,7 +11,7 @@ A simple terminal hex editor.
 - **Magic byte detection** — identifies file type (ELF, PE, Mach-O, ZIP, PDF, and hundreds more via `pyfsig`)
 - **Shannon entropy analysis** — displays entropy of the file (0–8 scale)
 - **Hex + ASCII panes** — edit in either pane, toggle with `Tab`
-- **Mouse drag selection** — click and drag to select a byte range, then copy as `\x`-style hex or ASCII
+- **Mouse drag selection** — click and drag to select a byte range, then copy as `\x`-style hex, ASCII, or C array
 - **Theme support** — respects Textual's built-in themes (Nord, Gruvbox, Catppuccin Mocha, and more)
 - **Save with choice** — overwrite the original or save a copy with a custom filename
 
