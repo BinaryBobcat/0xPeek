@@ -520,6 +520,7 @@ class HexEditApp(App):
             f"[bold]Copy {count} byte{'s' if count != 1 else ''}:[/]  "
             "[bold yellow]\\[H][/] Hex   "
             "[bold cyan]\\[A][/] ASCII   "
+            "[bold magenta]\\[C][/] C Array   "
             "[bright_black]\\[Esc][/] Cancel"
         )
 
@@ -648,6 +649,15 @@ class HexEditApp(App):
                 self._save_state = None
                 preview = text if len(text) <= 40 else text[:40] + "…"
                 bar.update(f"[bold green]Copied ASCII ({len(chunk)}B):[/] [white]{preview}[/]")
+                self.call_later(self._refresh_status)
+            elif event.key == "c" and sel is not None:
+                chunk = view.data[sel[0]:sel[1] + 1]
+                hex_vals = ", ".join(f"0x{b:02x}" for b in chunk)
+                text = f"uint8_t data[{len(chunk)}] = {{{hex_vals}}};"
+                self._clipboard_write(text)
+                self._save_state = None
+                preview = text if len(text) <= 40 else text[:40] + "…"
+                bar.update(f"[bold green]Copied C array ({len(chunk)}B):[/] [white]{preview}[/]")
                 self.call_later(self._refresh_status)
             elif event.key == "escape":
                 self._save_state = None
