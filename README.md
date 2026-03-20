@@ -31,13 +31,13 @@ pipx install .
 
 **Update to latest version:**
 ```bash
-pipx reinstall 0xpeek
+pipx reinstall 0xPeek
 ```
 
 ## Usage
 
 ```bash
-0xpeek <file>
+oxp <file>
 ```
 
 ## Interface

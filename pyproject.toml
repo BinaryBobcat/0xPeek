@@ -16,4 +16,4 @@ dependencies = [
 packages = ["oxpeek.py"]
 
 [project.scripts]
-0xpeek = "oxpeek:main"
+oxp = "oxpeek:main"
