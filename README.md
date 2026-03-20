@@ -29,6 +29,11 @@ cd 0xPeek
 pipx install .
 ```
 
+**Update to latest version:**
+```bash
+pipx reinstall 0xpeek
+```
+
 ## Usage
 
 ```bash
@@ -79,6 +84,7 @@ Press `Ctrl+C` to copy:
 
 - **`H`** — copies as `\x`-style hex: `\x4d\x5a\x90\x00`
 - **`A`** — copies as ASCII (non-printable bytes rendered as `\xNN`)
+- **`C`** — copies as a C array: `uint8_t data[4] = {0x4d, 0x5a, 0x90, 0x00};`
 - **`Esc`** — cancel
 
 If no selection exists, the current byte under the cursor is copied.
