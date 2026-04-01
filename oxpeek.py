@@ -141,7 +141,12 @@ class HexView(Widget):
         self._search_current: set[int] = set()     # current match byte positions
 
     def _total_rows(self) -> int:
-        return max(1, (len(self.data) + BYTES_PER_ROW - 1) // BYTES_PER_ROW)
+        n = len(self.data)
+        rows = max(1, (n + BYTES_PER_ROW - 1) // BYTES_PER_ROW)
+        # If cursor is at the append position and it starts a new row, add that row
+        if self.cursor_pos == n and n % BYTES_PER_ROW == 0:
+            rows = max(rows, n // BYTES_PER_ROW + 1)
+        return rows
 
     def sel_range(self) -> tuple[int, int] | None:
         """Returns (lo, hi) inclusive byte indices of current selection, or None."""
@@ -176,6 +181,27 @@ class HexView(Widget):
         offset = row * BYTES_PER_ROW
 
         if offset >= len(self.data):
+            # Render the append-cursor row when cursor is one past the end of data
+            if self.cursor_pos == len(self.data) and row == self.cursor_pos // BYTES_PER_ROW:
+                col = self.cursor_pos % BYTES_PER_ROW
+                segs: list[Segment] = [Segment(f"{offset:08x}  ", Style.parse("bright_blue"))]
+                for i in range(BYTES_PER_ROW):
+                    if i == col and self.edit_pane == "hex":
+                        segs.append(Segment("  ", Style.parse("black on yellow bold")))
+                    else:
+                        segs.append(Segment("  "))
+                    if i == 7:
+                        segs.append(Segment("  "))
+                    elif i < BYTES_PER_ROW - 1:
+                        segs.append(Segment(" "))
+                segs.append(Segment("  |", Style.parse("bright_black")))
+                for i in range(BYTES_PER_ROW):
+                    if i == col and self.edit_pane == "ascii":
+                        segs.append(Segment(" ", Style.parse("black on cyan bold")))
+                    else:
+                        segs.append(Segment(" "))
+                segs.append(Segment("|", Style.parse("bright_black")))
+                return Strip(segs)
             return Strip.blank(self.size.width)
 
         row_bytes = self.data[offset : offset + BYTES_PER_ROW]
@@ -339,13 +365,13 @@ class HexView(Widget):
             return
         if key == "end":
             row_start = (self.cursor_pos // BYTES_PER_ROW) * BYTES_PER_ROW
-            self._jump(min(len(self.data) - 1, row_start + BYTES_PER_ROW - 1))
+            self._jump(min(len(self.data), row_start + BYTES_PER_ROW - 1))
             return
         if key == "ctrl+home":
             self._jump(0)
             return
         if key == "ctrl+end":
-            self._jump(len(self.data) - 1)
+            self._jump(len(self.data))
             return
 
         char = event.character
@@ -359,10 +385,10 @@ class HexView(Widget):
 
     def _move(self, delta: int) -> None:
         self.pending_nibble = None
-        self._jump(max(0, min(len(self.data) - 1, self.cursor_pos + delta)))
+        self._jump(max(0, min(len(self.data), self.cursor_pos + delta)))
 
     def _jump(self, pos: int) -> None:
-        self.cursor_pos = pos
+        self.cursor_pos = max(0, min(len(self.data), pos))
         self.pending_nibble = None
         self._ensure_visible()
         self.refresh()
@@ -372,18 +398,25 @@ class HexView(Widget):
         if self.pending_nibble is None:
             self.pending_nibble = nibble
         else:
-            self.data[self.cursor_pos] = (self.pending_nibble << 4) | nibble
+            byte_val = (self.pending_nibble << 4) | nibble
+            if self.cursor_pos >= len(self.data):
+                self.data.append(byte_val)
+            else:
+                self.data[self.cursor_pos] = byte_val
             self.modified = True
             self.pending_nibble = None
-            self.cursor_pos = min(len(self.data) - 1, self.cursor_pos + 1)
+            self.cursor_pos = min(len(self.data), self.cursor_pos + 1)
             self._ensure_visible()
         self.refresh()
         self._post_cursor()
 
     def _ascii_input(self, byte: int) -> None:
-        self.data[self.cursor_pos] = byte
+        if self.cursor_pos >= len(self.data):
+            self.data.append(byte)
+        else:
+            self.data[self.cursor_pos] = byte
         self.modified = True
-        self.cursor_pos = min(len(self.data) - 1, self.cursor_pos + 1)
+        self.cursor_pos = min(len(self.data), self.cursor_pos + 1)
         self._ensure_visible()
         self.refresh()
         self._post_cursor()
@@ -451,10 +484,15 @@ class HexEditApp(App):
         ("ctrl+q", "quit_app", "Quit"),
     ]
 
-    def __init__(self, filepath: Path) -> None:
+    def __init__(self, filepath: Path | None) -> None:
         super().__init__()
         self.filepath = filepath
-        self._data = bytearray(filepath.read_bytes())
+        if filepath is not None and filepath.exists():
+            self._data = bytearray(filepath.read_bytes())
+            self._is_new_file = False
+        else:
+            self._data = bytearray()
+            self._is_new_file = True
         self._file_type = detect_file_type(self._data)
         self._save_state: str | None = None   # None | "prompt" | "copy_path" | "copy_fmt"
         self._copy_path_buf: str = ""
@@ -476,7 +514,7 @@ class HexEditApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.title = f"0xPeek — {self.filepath.name}"
+        self.title = f"0xPeek — {self.filepath.name}" if self.filepath else "0xPeek — [new file]"
         view = self.query_one("#hexview", HexView)
         view.focus()
         view._post_cursor()
@@ -550,14 +588,28 @@ class HexEditApp(App):
         view = self.query_one("#hexview", HexView)
         if not view.modified:
             return
+        # No path set — go straight to "save as" prompt
+        if self.filepath is None:
+            self._save_state = "copy_path"
+            self._copy_path_buf = ""
+            self._update_copy_prompt()
+            return
         self._save_state = "prompt"
         bar = self.query_one("#statusbar", Static)
-        bar.update(
-            "[bold]Save:[/]  "
-            "[bold yellow]\\[O][/] Overwrite original   "
-            "[bold cyan]\\[C][/] Save as copy   "
-            "[bright_black]\\[Esc][/] Cancel"
-        )
+        if self._is_new_file:
+            bar.update(
+                f"[bold]Save:[/]  "
+                f"[bold yellow]\\[W][/] Write {self.filepath.name}   "
+                "[bold cyan]\\[C][/] Save as copy   "
+                "[bright_black]\\[Esc][/] Cancel"
+            )
+        else:
+            bar.update(
+                "[bold]Save:[/]  "
+                "[bold yellow]\\[O][/] Overwrite original   "
+                "[bold cyan]\\[C][/] Save as copy   "
+                "[bright_black]\\[Esc][/] Cancel"
+            )
 
     def on_key(self, event: events.Key) -> None:
         if self._search_state == "mode":
@@ -609,9 +661,11 @@ class HexEditApp(App):
 
         if self._save_state == "prompt":
             event.stop()
-            if event.key == "o":
+            if event.key in ("o", "w"):
                 self._save_state = None
+                self._is_new_file = False
                 self.query_one("#hexview", HexView).save(self.filepath)
+                self.title = f"0xPeek — {self.filepath.name}"
                 self._refresh_status()
             elif event.key == "c":
                 self._save_state = "copy_path"
@@ -833,14 +887,11 @@ def main() -> None:
         prog="0xPeek",
         description="A terminal hex editor for reverse engineering and malware analysis.",
     )
-    parser.add_argument("file", help="Path to the file to view/edit")
+    parser.add_argument("file", nargs="?", help="Path to the file to view/edit (omit to start empty)")
     args = parser.parse_args()
 
-    path = Path(args.file)
-    if not path.exists():
-        print(f"0xPeek: '{path}': No such file", file=sys.stderr)
-        sys.exit(1)
-    if not path.is_file():
+    path = Path(args.file) if args.file else None
+    if path is not None and path.exists() and not path.is_file():
         print(f"0xPeek: '{path}': Not a regular file", file=sys.stderr)
         sys.exit(1)
 
